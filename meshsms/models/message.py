@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import Column, String, Numeric, Integer, Text, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Numeric, Integer, Text, DateTime, ForeignKey, Index, Uuid
 from sqlalchemy.orm import relationship
 
 from meshsms.database import Base
@@ -16,8 +16,8 @@ class SMSMessage(Base):
 
     __tablename__ = "sms_messages"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    tenant_id = Column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     jasmin_msgid = Column(String(100), unique=True, nullable=True, index=True)
     sender_id = Column(String(15), nullable=False)
     recipient = Column(String(20), nullable=False, index=True)

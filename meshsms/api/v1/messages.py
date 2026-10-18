@@ -105,9 +105,14 @@ async def get_message(
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieves full details and current delivery status for an SMS message."""
+    try:
+        mid = uuid.UUID(message_id)
+    except ValueError:
+        mid = message_id
+
     stmt = (
         select(SMSMessage)
-        .where(SMSMessage.id == message_id, SMSMessage.tenant_id == tenant.id)
+        .where(SMSMessage.id == mid, SMSMessage.tenant_id == tenant.id)
     )
     result = await db.execute(stmt)
     message = result.scalar_one_or_none()

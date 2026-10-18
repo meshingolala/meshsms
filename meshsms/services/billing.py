@@ -39,9 +39,16 @@ class BillingService:
         Returns the remaining balance after deduction.
         Raises InsufficientBalanceError if balance is insufficient.
         """
+        tid = tenant_id
+        if isinstance(tid, str):
+            try:
+                tid = uuid.UUID(tid)
+            except ValueError:
+                pass
+
         if cost <= Decimal("0.0000"):
             # Zero cost, fetch and return current balance
-            stmt = select(Tenant.balance).where(Tenant.id == tenant_id)
+            stmt = select(Tenant.balance).where(Tenant.id == tid)
             result = await db.execute(stmt)
             curr = result.scalar_one_or_none() or Decimal("0.0000")
             return curr
@@ -49,7 +56,7 @@ class BillingService:
         # Atomic update with balance check predicate
         stmt = (
             update(Tenant)
-            .where(Tenant.id == tenant_id, Tenant.balance >= cost)
+            .where(Tenant.id == tid, Tenant.balance >= cost)
             .values(balance=Tenant.balance - cost)
             .returning(Tenant.balance)
         )
@@ -84,9 +91,16 @@ class BillingService:
         if amount <= Decimal("0.0000"):
             return Decimal("0.0000")
 
+        tid = tenant_id
+        if isinstance(tid, str):
+            try:
+                tid = uuid.UUID(tid)
+            except ValueError:
+                pass
+
         stmt = (
             update(Tenant)
-            .where(Tenant.id == tenant_id)
+            .where(Tenant.id == tid)
             .values(balance=Tenant.balance + amount)
             .returning(Tenant.balance)
         )

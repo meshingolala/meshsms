@@ -1,6 +1,7 @@
+import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -21,7 +22,7 @@ class TenantTopup(BaseModel):
 
 class TenantResponse(BaseModel):
     """Tenant information response."""
-    id: str
+    id: Union[str, uuid.UUID]
     name: str
     api_key: str
     balance: Decimal

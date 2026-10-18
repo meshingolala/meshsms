@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import Column, String, Numeric, Boolean, DateTime
+from sqlalchemy import Column, String, Numeric, Boolean, DateTime, Uuid
 from sqlalchemy.orm import relationship
 
 from meshsms.database import Base
@@ -16,7 +16,7 @@ class Tenant(Base):
 
     __tablename__ = "tenants"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False)
     api_key = Column(String(64), unique=True, nullable=False, index=True)
     balance = Column(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)

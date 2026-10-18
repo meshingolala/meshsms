@@ -65,7 +65,15 @@ async def topup_balance(
     db: AsyncSession = Depends(get_db),
 ):
     """Adds credit to a tenant's wallet balance."""
-    stmt = select(Tenant).where(Tenant.id == tenant_id)
+    try:
+        tid = uuid.UUID(tenant_id)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tenant ID format",
+        )
+
+    stmt = select(Tenant).where(Tenant.id == tid)
     result = await db.execute(stmt)
     tenant = result.scalar_one_or_none()
 

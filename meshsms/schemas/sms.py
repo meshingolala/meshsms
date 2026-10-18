@@ -1,6 +1,7 @@
+import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, Field, HttpUrl
 
 
@@ -33,7 +34,7 @@ class SendSMSPayload(BaseModel):
 
 class SMSResponse(BaseModel):
     """Response returned upon message queuing."""
-    id: str
+    id: Union[str, uuid.UUID]
     status: str
     message_id: Optional[str] = None
     encoding: str
@@ -46,8 +47,8 @@ class SMSResponse(BaseModel):
 
 class SMSDetailResponse(BaseModel):
     """Full detail of a stored SMS message."""
-    id: str
-    tenant_id: str
+    id: Union[str, uuid.UUID]
+    tenant_id: Union[str, uuid.UUID]
     message_id: Optional[str]
     sender_id: str
     recipient: str
