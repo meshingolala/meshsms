@@ -155,8 +155,8 @@ def configure_jasmin(
     carrier_pass = carrier_pass or "password"
     carrier_cid = carrier_cid or "carrier_mtn"
 
-    api_user = api_user or "gateway_api_user"
-    api_pass = api_pass or "super_secret_pwd"
+    api_user = api_user or "gatewayapiuser"
+    api_pass = api_pass or "supersecretpwd"
 
     client = JasminClient(host=host, port=port, username=username, password=password)
     try:
@@ -164,20 +164,25 @@ def configure_jasmin(
 
         # Step A: Add Upstream Carrier Connector
         logger.info("Step A: Creating SMPP connector '%s'...", carrier_cid)
-        client.send_cmd("smppccm -a")
-        client.send_cmd(f"cid {carrier_cid}")
-        client.send_cmd(f"host {carrier_host}")
-        client.send_cmd(f"port {carrier_port}")
-        client.send_cmd(f"username {carrier_user}")
-        client.send_cmd(f"password {carrier_pass}")
-        client.send_cmd("bind transceiver")
-        client.send_cmd("submit_throughput 50")
-        client.send_cmd("dlr_msgid 1")
-        client.send_cmd("src_ton 5")
-        client.send_cmd("src_npi 0")
-        client.send_cmd("dst_ton 1")
-        client.send_cmd("dst_npi 1")
-        client.send_cmd("ok")
+        res_a = client.send_cmd("smppccm -a")
+        if "already exists" in res_a or "Adding a new connector" not in res_a:
+            client.send_cmd("ko")
+        else:
+            client.send_cmd(f"cid {carrier_cid}")
+            client.send_cmd(f"host {carrier_host}")
+            client.send_cmd(f"port {carrier_port}")
+            client.send_cmd(f"username {carrier_user}")
+            client.send_cmd(f"password {carrier_pass}")
+            client.send_cmd("bind transceiver")
+            client.send_cmd("submit_throughput 50")
+            client.send_cmd("dlr_msgid 1")
+            client.send_cmd("src_ton 5")
+            client.send_cmd("src_npi 0")
+            client.send_cmd("dst_ton 1")
+            client.send_cmd("dst_npi 1")
+            ok_res = client.send_cmd("ok")
+            if "Error" in ok_res or "already" in ok_res:
+                client.send_cmd("ko")
 
         # Start connector
         logger.info("Starting connector '%s'...", carrier_cid)
@@ -185,24 +190,35 @@ def configure_jasmin(
 
         # Step B: Create Group and Internal API User
         logger.info("Step B: Creating group 'api_group' and user '%s'...", api_user)
-        client.send_cmd("group -a")
-        client.send_cmd("gid api_group")
-        client.send_cmd("ok")
+        res_g = client.send_cmd("group -a")
+        if "Adding a new Group" in res_g:
+            client.send_cmd("gid api_group")
+            client.send_cmd("ok")
+        else:
+            client.send_cmd("ko")
 
-        client.send_cmd("user -a")
-        client.send_cmd("uid internal_api")
-        client.send_cmd("gid api_group")
-        client.send_cmd(f"username {api_user}")
-        client.send_cmd(f"password {api_pass}")
-        client.send_cmd("ok")
+        res_u = client.send_cmd("user -a")
+        if "Adding a new User" in res_u:
+            client.send_cmd("uid internal_api")
+            client.send_cmd("gid api_group")
+            client.send_cmd(f"username {api_user}")
+            client.send_cmd(f"password {api_pass}")
+            usr_ok = client.send_cmd("ok")
+            if "Error" in usr_ok:
+                client.send_cmd("ko")
+        else:
+            client.send_cmd("ko")
 
         # Step C: Configure Outbound MT Routing
         logger.info("Step C: Creating DefaultRoute to connector smppc(%s)...", carrier_cid)
-        client.send_cmd("mtrouter -a")
-        client.send_cmd("type DefaultRoute")
-        client.send_cmd(f"connector smppc({carrier_cid})")
-        client.send_cmd("rate 0.00")
-        client.send_cmd("ok")
+        res_r = client.send_cmd("mtrouter -a")
+        if "Adding a new" in res_r or "type" in res_r:
+            client.send_cmd("type DefaultRoute")
+            client.send_cmd(f"connector smppc({carrier_cid})")
+            client.send_cmd("rate 0.00")
+            client.send_cmd("ok")
+        else:
+            client.send_cmd("ko")
 
         # Step D: Persist
         logger.info("Step D: Persisting configuration...")

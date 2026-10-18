@@ -97,8 +97,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://meshsms:secret_meshsms_pw@postgres:5432/meshsms
       - JASMIN_SEND_URL=http://jasmin:1401/send
-      - JASMIN_USER=gateway_api_user
-      - JASMIN_PASS=super_secret_pwd
+      - JASMIN_USER=gatewayapiuser
+      - JASMIN_PASS=supersecretpwd
       - PUBLIC_DLR_CALLBACK_URL=http://meshsms:8000/internal/dlr-webhook
       - JASMIN_TELNET_HOST=jasmin
       - MOCK_JASMIN=false

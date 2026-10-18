@@ -21,8 +21,8 @@ class Settings(BaseSettings):
 
     # Jasmin SMS Gateway HTTP API settings
     JASMIN_SEND_URL: str = "http://localhost:1401/send"
-    JASMIN_USER: str = "gateway_api_user"
-    JASMIN_PASS: str = "super_secret_pwd"
+    JASMIN_USER: str = "gatewayapiuser"
+    JASMIN_PASS: str = "supersecretpwd"
     PUBLIC_DLR_CALLBACK_URL: str = "http://host.docker.internal:8000/internal/dlr-webhook"
 
     # Mock mode: simulates Jasmin HTTP gateway responses for local testing / offline dev
