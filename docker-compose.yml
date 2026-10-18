@@ -92,6 +92,8 @@ services:
         condition: service_started
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app
     environment:
       - DATABASE_URL=postgresql+asyncpg://meshsms:secret_meshsms_pw@postgres:5432/meshsms
       - JASMIN_SEND_URL=http://jasmin:1401/send
