@@ -67,9 +67,8 @@ services:
       - AMQP_BROKER_PORT=5672
       - ENABLE_PUBLISH_SUBMIT_SM_RESP=1
     volumes:
-      - ./jasmin_store:/etc/jasmin/store
-      - ./jasmin_logs:/var/log/jasmin
-      - ./jasmin.cfg:/etc/jasmin/jasmin.cfg:ro
+      - jasmin_store:/etc/jasmin/store
+      - jasmin_logs:/var/log/jasmin
 
   # SMPP Simulator for local end-to-end testing without a real carrier bind
   smppsim:
@@ -110,3 +109,5 @@ volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  jasmin_store:
+  jasmin_logs:
