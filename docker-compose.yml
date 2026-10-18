@@ -69,6 +69,7 @@ services:
     volumes:
       - ./jasmin_store:/etc/jasmin/store
       - ./jasmin_logs:/var/log/jasmin
+      - ./jasmin.cfg:/etc/jasmin/jasmin.cfg:ro
 
   # SMPP Simulator for local end-to-end testing without a real carrier bind
   smppsim:

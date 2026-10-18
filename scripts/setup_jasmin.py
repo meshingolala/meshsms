@@ -44,9 +44,9 @@ class JasminTelnetClient:
 
         # Read welcome banner / login prompt
         self._read_until(b"Username:")
-        self.sock.sendall(f"{self.username}\n".encode())
+        self.sock.sendall(f"{self.username}\r\n".encode())
         self._read_until(b"Password:")
-        self.sock.sendall(f"{self.password}\n".encode())
+        self.sock.sendall(f"{self.password}\r\n".encode())
         output = self._read_until(b"jcli :")
         if b"Authentication failed" in output:
             raise RuntimeError("Jasmin CLI authentication failed! Check credentials.")
@@ -55,18 +55,22 @@ class JasminTelnetClient:
     def _read_until(self, expected: bytes) -> bytes:
         buffer = b""
         start = time.time()
+        self.sock.settimeout(2.0)
         while expected not in buffer:
             if time.time() - start > self.timeout:
                 raise TimeoutError(f"Timeout waiting for {expected}. Received so far: {buffer.decode(errors='ignore')}")
-            chunk = self.sock.recv(4096)
-            if not chunk:
-                break
-            buffer += chunk
+            try:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                buffer += chunk
+            except socket.timeout:
+                continue
         return buffer
 
     def send_cmd(self, command: str) -> str:
         logger.debug(">> %s", command)
-        self.sock.sendall(f"{command}\n".encode())
+        self.sock.sendall(f"{command}\r\n".encode())
         res = self._read_until(b"jcli :")
         decoded = res.decode(errors="ignore").strip()
         logger.debug("<< %s", decoded)
@@ -75,12 +79,12 @@ class JasminTelnetClient:
     def send_interactive_block(self, init_cmd: str, subcommands: list[str]) -> str:
         """Sends an interactive command that expects > prompts until 'ok' or prompt returns to jcli :."""
         logger.info("Executing interactive block: %s", init_cmd)
-        self.sock.sendall(f"{init_cmd}\n".encode())
+        self.sock.sendall(f"{init_cmd}\r\n".encode())
         out = self._read_until(b">")
 
         for sub in subcommands:
             logger.info("  > %s", sub)
-            self.sock.sendall(f"{sub}\n".encode())
+            self.sock.sendall(f"{sub}\r\n".encode())
             if sub == "ok":
                 out += self._read_until(b"jcli :")
             else:
