@@ -98,6 +98,7 @@ services:
       - JASMIN_USER=gateway_api_user
       - JASMIN_PASS=super_secret_pwd
       - PUBLIC_DLR_CALLBACK_URL=http://meshsms:8000/internal/dlr-webhook
+      - JASMIN_TELNET_HOST=jasmin
       - MOCK_JASMIN=false
       - DEFAULT_COST_PER_SEGMENT=0.0150
       - DLR_EXPIRY_HOURS=72

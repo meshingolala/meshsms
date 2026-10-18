@@ -8,27 +8,40 @@ Configures:
 4. Persists configuration to disk (Step D)
 """
 
+import os
 import sys
 import time
 import socket
 import logging
+import argparse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("setup_jasmin")
 
 
 class JasminTelnetClient:
-    def __init__(self, host="127.0.0.1", port=8990, username="jcliadmin", password="jclipwd", timeout=10):
+    def __init__(self, host="127.0.0.1", port=8990, username="jcliadmin", password="jclipwd", timeout=10, max_retries=15):
         self.host = host
-        self.port = port
+        self.port = int(port)
         self.username = username
         self.password = password
         self.timeout = timeout
+        self.max_retries = max_retries
         self.sock = None
 
     def connect(self):
         logger.info("Connecting to Jasmin CLI at %s:%s...", self.host, self.port)
-        self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+                break
+            except (ConnectionRefusedError, OSError) as exc:
+                if attempt == self.max_retries:
+                    logger.error("Failed to connect after %d attempts: %s", self.max_retries, exc)
+                    raise
+                logger.info("Jasmin Telnet not ready yet (attempt %d/%d). Retrying in 2s...", attempt, self.max_retries)
+                time.sleep(2)
+
         # Read welcome banner / login prompt
         self._read_until(b"Username:")
         self.sock.sendall(f"{self.username}\n".encode())
@@ -84,17 +97,38 @@ class JasminTelnetClient:
 
 
 def configure_jasmin(
-    host="127.0.0.1",
-    port=8990,
-    carrier_host="smppsim",
-    carrier_port=2775,
-    carrier_user="smppclient1",
-    carrier_pass="password",
-    carrier_cid="carrier_mtn",
-    api_user="gateway_api_user",
-    api_pass="super_secret_pwd",
+    host=None,
+    port=None,
+    username=None,
+    password=None,
+    carrier_host=None,
+    carrier_port=None,
+    carrier_user=None,
+    carrier_pass=None,
+    carrier_cid=None,
+    api_user=None,
+    api_pass=None,
 ):
-    client = JasminTelnetClient(host=host, port=port)
+    # Auto-detect host: if running inside container or env var is set, use 'jasmin'
+    default_host = os.environ.get("JASMIN_TELNET_HOST")
+    if not default_host:
+        default_host = "jasmin" if os.path.exists("/.dockerenv") else "127.0.0.1"
+
+    host = host or default_host
+    port = int(port or os.environ.get("JASMIN_TELNET_PORT", 8990))
+    username = username or os.environ.get("JASMIN_TELNET_USER", "jcliadmin")
+    password = password or os.environ.get("JASMIN_TELNET_PASS", "jclipwd")
+
+    carrier_host = carrier_host or os.environ.get("SMPP_CARRIER_HOST", "smppsim")
+    carrier_port = int(carrier_port or os.environ.get("SMPP_CARRIER_PORT", 2775))
+    carrier_user = carrier_user or os.environ.get("SMPP_CARRIER_USER", "smppclient1")
+    carrier_pass = carrier_pass or os.environ.get("SMPP_CARRIER_PASS", "password")
+    carrier_cid = carrier_cid or "carrier_mtn"
+
+    api_user = api_user or os.environ.get("JASMIN_USER", "gateway_api_user")
+    api_pass = api_pass or os.environ.get("JASMIN_PASS", "super_secret_pwd")
+
+    client = JasminTelnetClient(host=host, port=port, username=username, password=password)
     try:
         client.connect()
 
@@ -163,4 +197,26 @@ def configure_jasmin(
 
 
 if __name__ == "__main__":
-    configure_jasmin()
+    parser = argparse.ArgumentParser(description="Configure Jasmin SMS Gateway via Telnet")
+    parser.add_argument("--host", default=None, help="Jasmin Telnet host (default: jasmin in docker, else 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=None, help="Jasmin Telnet port (default: 8990)")
+    parser.add_argument("--username", default=None, help="Jasmin jcli username (default: jcliadmin)")
+    parser.add_argument("--password", default=None, help="Jasmin jcli password (default: jclipwd)")
+    parser.add_argument("--carrier-host", default=None, help="SMPP carrier host (default: smppsim)")
+    parser.add_argument("--carrier-port", type=int, default=None, help="SMPP carrier port (default: 2775)")
+    parser.add_argument("--carrier-user", default=None, help="SMPP carrier username")
+    parser.add_argument("--carrier-pass", default=None, help="SMPP carrier password")
+    parser.add_argument("--carrier-cid", default=None, help="SMPP connector ID (default: carrier_mtn)")
+    args = parser.parse_args()
+
+    configure_jasmin(
+        host=args.host,
+        port=args.port,
+        username=args.username,
+        password=args.password,
+        carrier_host=args.carrier_host,
+        carrier_port=args.carrier_port,
+        carrier_user=args.carrier_user,
+        carrier_pass=args.carrier_pass,
+        carrier_cid=args.carrier_cid,
+    )
