@@ -1,5 +1,5 @@
 """
-Automated Jasmin SMPP Gateway Configuration Script via Telnet (jcli).
+Automated Jasmin SMPP Gateway Configuration Script via Telnet / Raw Socket.
 
 Configures:
 1. Upstream SMPP Carrier Connector (Step A)
@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("setup_jasmin")
 
 
-class JasminTelnetClient:
+class JasminClient:
     def __init__(self, host="127.0.0.1", port=8990, username="jcliadmin", password="jclipwd", timeout=10, max_retries=15):
         self.host = host
         self.port = int(port)
@@ -31,7 +31,7 @@ class JasminTelnetClient:
 
     def connect(self):
         candidates = [self.host]
-        for fallback in ["sms_jasmin", "jasmin", "127.0.0.1", "localhost"]:
+        for fallback in ["127.0.0.1", "sms_jasmin", "jasmin", "localhost"]:
             if fallback not in candidates:
                 candidates.append(fallback)
 
@@ -41,7 +41,9 @@ class JasminTelnetClient:
         logger.info("Connecting to Jasmin CLI (candidates: %s on port %s)...", candidates, self.port)
         for target_host in candidates:
             try:
-                self.sock = socket.create_connection((target_host, self.port), timeout=self.timeout)
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(self.timeout)
+                self.sock.connect((target_host, self.port))
                 self.host = target_host
                 connected = True
                 logger.info("Connected to Jasmin CLI via host '%s'!", target_host)
@@ -51,11 +53,12 @@ class JasminTelnetClient:
                 continue
 
         if not connected:
-            # If all failed on first pass, retry with backoff
             for attempt in range(1, self.max_retries + 1):
                 for target_host in candidates:
                     try:
-                        self.sock = socket.create_connection((target_host, self.port), timeout=self.timeout)
+                        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        self.sock.settimeout(self.timeout)
+                        self.sock.connect((target_host, self.port))
                         self.host = target_host
                         connected = True
                         logger.info("Connected to Jasmin CLI via host '%s'!", target_host)
@@ -71,54 +74,53 @@ class JasminTelnetClient:
         if not connected:
             raise RuntimeError(f"Could not connect to Jasmin on any host {candidates}: {last_error}")
 
-        # Read welcome banner / login prompt
-        self._read_until(b"Username:")
-        self.sock.sendall(f"{self.username}\r\n".encode())
-        self._read_until(b"Password:")
-        self.sock.sendall(f"{self.password}\r\n".encode())
-        output = self._read_until(b"jcli :")
-        if b"Authentication failed" in output:
-            raise RuntimeError("Jasmin CLI authentication failed! Check credentials.")
-        logger.info("Successfully authenticated to Jasmin jcli.")
+        # Login flow
+        time.sleep(1.0)
+        initial_banner = self._read_available()
+        logger.info("Server banner: %s", initial_banner.strip())
 
-    def _read_until(self, expected: bytes) -> bytes:
+        # Send Username
+        logger.info("Authenticating user '%s'...", self.username)
+        self.sock.sendall(f"{self.username}\n".encode())
+        time.sleep(0.5)
+        user_res = self._read_available()
+
+        # Send Password
+        self.sock.sendall(f"{self.password}\n".encode())
+        time.sleep(1.0)
+        login_res = self._read_available()
+
+        if "Authentication failed" in login_res or "Invalid" in login_res:
+            raise RuntimeError(f"Jasmin authentication failed: {login_res}")
+
+        logger.info("Successfully authenticated to Jasmin jcli!")
+
+    def _read_available(self) -> str:
+        """Reads currently available bytes from the socket without blocking indefinitely."""
+        self.sock.setblocking(False)
         buffer = b""
-        start = time.time()
-        self.sock.settimeout(2.0)
-        while expected not in buffer:
-            if time.time() - start > self.timeout:
-                raise TimeoutError(f"Timeout waiting for {expected}. Received so far: {buffer.decode(errors='ignore')}")
+        time.sleep(0.3)
+        while True:
             try:
                 chunk = self.sock.recv(4096)
                 if not chunk:
                     break
                 buffer += chunk
-            except socket.timeout:
-                continue
-        return buffer
+            except BlockingIOError:
+                break
+            except Exception:
+                break
+        self.sock.setblocking(True)
+        return buffer.decode("utf-8", errors="ignore")
 
-    def send_cmd(self, command: str) -> str:
-        logger.debug(">> %s", command)
-        self.sock.sendall(f"{command}\r\n".encode())
-        res = self._read_until(b"jcli :")
-        decoded = res.decode(errors="ignore").strip()
-        logger.debug("<< %s", decoded)
-        return decoded
-
-    def send_interactive_block(self, init_cmd: str, subcommands: list[str]) -> str:
-        """Sends an interactive command that expects > prompts until 'ok' or prompt returns to jcli :."""
-        logger.info("Executing interactive block: %s", init_cmd)
-        self.sock.sendall(f"{init_cmd}\r\n".encode())
-        out = self._read_until(b">")
-
-        for sub in subcommands:
-            logger.info("  > %s", sub)
-            self.sock.sendall(f"{sub}\r\n".encode())
-            if sub == "ok":
-                out += self._read_until(b"jcli :")
-            else:
-                out += self._read_until(b">")
-        return out.decode(errors="ignore")
+    def send_cmd(self, command: str, delay: float = 0.5) -> str:
+        logger.info(">> %s", command)
+        self.sock.sendall(f"{command}\n".encode())
+        time.sleep(delay)
+        output = self._read_available().strip()
+        if output:
+            logger.info("<< %s", output)
+        return output
 
     def close(self):
         if self.sock:
@@ -142,49 +144,40 @@ def configure_jasmin(
     api_user=None,
     api_pass=None,
 ):
-    # Auto-detect host: if running inside container or env var is set, use 'jasmin'
-    default_host = os.environ.get("JASMIN_TELNET_HOST")
-    if not default_host:
-        default_host = "jasmin" if os.path.exists("/.dockerenv") else "127.0.0.1"
+    host = host or ("jasmin" if os.path.exists("/.dockerenv") else "127.0.0.1")
+    port = int(port or 8990)
+    username = username or "jcliadmin"
+    password = password or "jclipwd"
 
-    host = host or default_host
-    port = int(port or os.environ.get("JASMIN_TELNET_PORT", 8990))
-    username = username or os.environ.get("JASMIN_TELNET_USER", "jcliadmin")
-    password = password or os.environ.get("JASMIN_TELNET_PASS", "jclipwd")
-
-    carrier_host = carrier_host or os.environ.get("SMPP_CARRIER_HOST", "smppsim")
-    carrier_port = int(carrier_port or os.environ.get("SMPP_CARRIER_PORT", 2775))
-    carrier_user = carrier_user or os.environ.get("SMPP_CARRIER_USER", "smppclient1")
-    carrier_pass = carrier_pass or os.environ.get("SMPP_CARRIER_PASS", "password")
+    carrier_host = carrier_host or "smppsim"
+    carrier_port = int(carrier_port or 2775)
+    carrier_user = carrier_user or "smppclient1"
+    carrier_pass = carrier_pass or "password"
     carrier_cid = carrier_cid or "carrier_mtn"
 
-    api_user = api_user or os.environ.get("JASMIN_USER", "gateway_api_user")
-    api_pass = api_pass or os.environ.get("JASMIN_PASS", "super_secret_pwd")
+    api_user = api_user or "gateway_api_user"
+    api_pass = api_pass or "super_secret_pwd"
 
-    client = JasminTelnetClient(host=host, port=port, username=username, password=password)
+    client = JasminClient(host=host, port=port, username=username, password=password)
     try:
         client.connect()
 
         # Step A: Add Upstream Carrier Connector
         logger.info("Step A: Creating SMPP connector '%s'...", carrier_cid)
-        client.send_interactive_block(
-            "smppccm -a",
-            [
-                f"cid {carrier_cid}",
-                f"host {carrier_host}",
-                f"port {carrier_port}",
-                f"username {carrier_user}",
-                f"password {carrier_pass}",
-                "bind transceiver",
-                "submit_throughput 50",
-                "dlr_msgid 1",
-                "src_ton 5",
-                "src_npi 0",
-                "dst_ton 1",
-                "dst_npi 1",
-                "ok",
-            ],
-        )
+        client.send_cmd("smppccm -a")
+        client.send_cmd(f"cid {carrier_cid}")
+        client.send_cmd(f"host {carrier_host}")
+        client.send_cmd(f"port {carrier_port}")
+        client.send_cmd(f"username {carrier_user}")
+        client.send_cmd(f"password {carrier_pass}")
+        client.send_cmd("bind transceiver")
+        client.send_cmd("submit_throughput 50")
+        client.send_cmd("dlr_msgid 1")
+        client.send_cmd("src_ton 5")
+        client.send_cmd("src_npi 0")
+        client.send_cmd("dst_ton 1")
+        client.send_cmd("dst_npi 1")
+        client.send_cmd("ok")
 
         # Start connector
         logger.info("Starting connector '%s'...", carrier_cid)
@@ -192,34 +185,28 @@ def configure_jasmin(
 
         # Step B: Create Group and Internal API User
         logger.info("Step B: Creating group 'api_group' and user '%s'...", api_user)
-        client.send_interactive_block("group -a", ["gid api_group", "ok"])
-        client.send_interactive_block(
-            "user -a",
-            [
-                "uid internal_api",
-                "gid api_group",
-                f"username {api_user}",
-                f"password {api_pass}",
-                "ok",
-            ],
-        )
+        client.send_cmd("group -a")
+        client.send_cmd("gid api_group")
+        client.send_cmd("ok")
+
+        client.send_cmd("user -a")
+        client.send_cmd("uid internal_api")
+        client.send_cmd("gid api_group")
+        client.send_cmd(f"username {api_user}")
+        client.send_cmd(f"password {api_pass}")
+        client.send_cmd("ok")
 
         # Step C: Configure Outbound MT Routing
         logger.info("Step C: Creating DefaultRoute to connector smppc(%s)...", carrier_cid)
-        client.send_interactive_block(
-            "mtrouter -a",
-            [
-                "type DefaultRoute",
-                f"connector smppc({carrier_cid})",
-                "rate 0.00",
-                "ok",
-            ],
-        )
+        client.send_cmd("mtrouter -a")
+        client.send_cmd("type DefaultRoute")
+        client.send_cmd(f"connector smppc({carrier_cid})")
+        client.send_cmd("rate 0.00")
+        client.send_cmd("ok")
 
         # Step D: Persist
         logger.info("Step D: Persisting configuration...")
-        res = client.send_cmd("persist")
-        logger.info("Persist response: %s", res)
+        client.send_cmd("persist", delay=1.0)
         logger.info("Jasmin SMS Gateway configured successfully!")
 
     except Exception as exc:
@@ -230,16 +217,16 @@ def configure_jasmin(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Configure Jasmin SMS Gateway via Telnet")
-    parser.add_argument("--host", default=None, help="Jasmin Telnet host (default: jasmin in docker, else 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=None, help="Jasmin Telnet port (default: 8990)")
-    parser.add_argument("--username", default=None, help="Jasmin jcli username (default: jcliadmin)")
-    parser.add_argument("--password", default=None, help="Jasmin jcli password (default: jclipwd)")
-    parser.add_argument("--carrier-host", default=None, help="SMPP carrier host (default: smppsim)")
-    parser.add_argument("--carrier-port", type=int, default=None, help="SMPP carrier port (default: 2775)")
+    parser = argparse.ArgumentParser(description="Configure Jasmin SMS Gateway via Telnet/Socket")
+    parser.add_argument("--host", default=None, help="Jasmin Telnet host")
+    parser.add_argument("--port", type=int, default=None, help="Jasmin Telnet port")
+    parser.add_argument("--username", default=None, help="Jasmin jcli username")
+    parser.add_argument("--password", default=None, help="Jasmin jcli password")
+    parser.add_argument("--carrier-host", default=None, help="SMPP carrier host")
+    parser.add_argument("--carrier-port", type=int, default=None, help="SMPP carrier port")
     parser.add_argument("--carrier-user", default=None, help="SMPP carrier username")
     parser.add_argument("--carrier-pass", default=None, help="SMPP carrier password")
-    parser.add_argument("--carrier-cid", default=None, help="SMPP connector ID (default: carrier_mtn)")
+    parser.add_argument("--carrier-cid", default=None, help="SMPP connector ID")
     args = parser.parse_args()
 
     configure_jasmin(
