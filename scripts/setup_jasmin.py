@@ -30,17 +30,46 @@ class JasminTelnetClient:
         self.sock = None
 
     def connect(self):
-        logger.info("Connecting to Jasmin CLI at %s:%s...", self.host, self.port)
-        for attempt in range(1, self.max_retries + 1):
+        candidates = [self.host]
+        for fallback in ["sms_jasmin", "jasmin", "127.0.0.1", "localhost"]:
+            if fallback not in candidates:
+                candidates.append(fallback)
+
+        connected = False
+        last_error = None
+
+        logger.info("Connecting to Jasmin CLI (candidates: %s on port %s)...", candidates, self.port)
+        for target_host in candidates:
             try:
-                self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+                self.sock = socket.create_connection((target_host, self.port), timeout=self.timeout)
+                self.host = target_host
+                connected = True
+                logger.info("Connected to Jasmin CLI via host '%s'!", target_host)
                 break
-            except (ConnectionRefusedError, OSError) as exc:
-                if attempt == self.max_retries:
-                    logger.error("Failed to connect after %d attempts: %s", self.max_retries, exc)
-                    raise
+            except (socket.gaierror, ConnectionRefusedError, OSError) as exc:
+                last_error = exc
+                continue
+
+        if not connected:
+            # If all failed on first pass, retry with backoff
+            for attempt in range(1, self.max_retries + 1):
+                for target_host in candidates:
+                    try:
+                        self.sock = socket.create_connection((target_host, self.port), timeout=self.timeout)
+                        self.host = target_host
+                        connected = True
+                        logger.info("Connected to Jasmin CLI via host '%s'!", target_host)
+                        break
+                    except (socket.gaierror, ConnectionRefusedError, OSError) as exc:
+                        last_error = exc
+                        continue
+                if connected:
+                    break
                 logger.info("Jasmin Telnet not ready yet (attempt %d/%d). Retrying in 2s...", attempt, self.max_retries)
                 time.sleep(2)
+
+        if not connected:
+            raise RuntimeError(f"Could not connect to Jasmin on any host {candidates}: {last_error}")
 
         # Read welcome banner / login prompt
         self._read_until(b"Username:")
